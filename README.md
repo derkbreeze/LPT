@@ -2,7 +2,7 @@
 Official implementation of the CVPR2022 paper "Learning of Global Objective for Network Flow in Multi-Object Tracking"
 Code coming soon!
 
-### Preparation
+### In order to run the code successfully
 - **Gurobi Python:**
 Please make sure to install Gurobi Python interface first. 
 To check whether the install is successful or not, Do following python code

@@ -1,6 +1,5 @@
 # LPT
 Official implementation of the CVPR2022 paper "Learning of Global Objective for Network Flow in Multi-Object Tracking"
-Code coming soon!
 
 ### In order to run the code successfully
 - **Gurobi Python:**
@@ -17,14 +16,13 @@ If the installation is successful, there will be no warnings/errors.
 - **ReID:**
 Please install torchreid, it can be downloaded from: [\[torchreid\]](https://github.com/KaiyangZhou/deep-person-reid). and put it inside ./lib folder.
 
+### Data
+Download pre-processed detections&appearance(aka ReID) features (~2.1GB): [\[Google Drive\]](https://drive.google.com/drive/folders/1GdpxkEevzdDC04k5AATgrxhrwp3MIS-A?usp=sharing)
 
 ### Training
 Run run_qp.ipynb.
 
 ### Inference
 Run run_test.ipynb, you need to adjust the MOT17/20 dataset path accordingly.
-
-- **To Do List:**
-Upload data and so on.
 
 If you have any questions using this code, please open an issue. I'll respond ASAP.

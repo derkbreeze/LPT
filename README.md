@@ -26,3 +26,14 @@ Run run_qp.ipynb.
 Run run_test.ipynb, you need to adjust the MOT17/20 dataset path accordingly.
 
 If you have any questions using this code, please open an issue. I'll respond ASAP.
+
+## Citing Unicorn
+If you find this code useful in your research, please consider citing:
+```bibtex
+@inproceedings{Li2022Learning,
+  title={Learning of Global Objective for Network Flow in Multi-Object Tracking},
+  author={Li, Shuai and Kong, Yu and Rezatofighi, Hamid},
+  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages={8855--8865},
+  year={2022}
+}

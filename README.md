@@ -23,17 +23,17 @@ Please install torchreid, it can be downloaded from: [\[torchreid\]](https://git
 Download pre-processed detections&appearance(aka ReID) features (~2.1GB): [\[Google Drive\]](https://drive.google.com/drive/folders/1GdpxkEevzdDC04k5AATgrxhrwp3MIS-A?usp=sharing)
 
 ### Training
-Run run_qp.ipynb. Monitor all relevant metrics, using our provided data, the loss converges at around 8 epochs. Training with more data might be helpful, but not tested.
+Execute run_qp.ipynb. Monitor all relevant metrics, using our provided data, the loss converges at around 8 epochs. Training with more data might be helpful, but not tested.
 
 ### Inference
-Run run_test.ipynb, you need to adjust the MOT17/20 data path accordingly.
+Execute run_test.ipynb, you need to adjust the MOT17/20 data path accordingly. For one specific MOT20 sequence, running time could be long. 
 
 If you have any questions using this code, please open an issue. I'll respond ASAP.
 
 ## Citing
 If you find this code useful in your research, please consider citing:
 ```bibtex
-@inproceedings{Li2022Learning,
+@inproceedings{li2022learning,
   title={Learning of Global Objective for Network Flow in Multi-Object Tracking},
   author={Li, Shuai and Kong, Yu and Rezatofighi, Hamid},
   booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},

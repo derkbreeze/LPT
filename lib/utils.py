@@ -4,26 +4,23 @@ import numpy as np
 
 def computeBoxFeatures(bbox1, bbox2):
     """
-    bbox1, bbox2 in xmin, ymin, xmax, ymax format
+    Assuming bbox1, bbox2 in xmin, ymin, xmax, ymax format
     """
-    top_1, left_1 = (bbox1[0], bbox1[3])
-    top_2, left_2 = (bbox2[0], bbox2[3])
+    xmin_1, ymax_1 = bbox1[0], bbox1[3]
+    xmin_2, ymax_2 = bbox2[0], bbox2[3]
+    width_1, height_1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
+    width_2, height_2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
 
-    width_1 = bbox1[2] - bbox1[0]
-    width_2 = bbox2[2] - bbox2[0]
+    y_rel_dist = 2 * (ymax_1 - ymax_2) / (height_1 + height_2)
+    x_rel_dist = 2 * (xmin_1 - xmin_2) / (height_1 + height_2)
+    y_rel_size = np.log(height_1 / height_2)
+    x_rel_size = np.log(width_1 / width_2)
     
-    height_1 = bbox1[3] - bbox1[1]
-    height_2 = bbox2[3] - bbox2[1]
-
-    y_rel_dist = 2 * (top_1 - top_2) / (height_1 + height_2)
-    x_rel_dist = 2 * (left_1 - left_2) / (height_1 + height_2)
-    rel_size_y = np.log(height_1 / height_2)
-    rel_size_x = np.log(width_1 / width_2)
-    return [x_rel_dist, y_rel_dist, rel_size_y, rel_size_x]
+    return [y_rel_dist, x_rel_dist, y_rel_size, x_rel_size]
 
 def getIoU(bbox1, bbox2):
     """
-    bbox1, bbox2 in xmin, ymin, xmax, ymax format
+    Assuming bbox1, bbox2 in xmin, ymin, xmax, ymax format
     """
     ixmin = max(bbox1[0], bbox2[0])
     ixmax = min(bbox1[2], bbox2[2])
@@ -32,10 +29,10 @@ def getIoU(bbox1, bbox2):
 
     iw = np.maximum(ixmax-ixmin+1., 0.)
     ih = np.maximum(iymax-iymin+1., 0.)
-    inters = iw*ih
+    intersection = iw*ih
     
-    uni = ((bbox1[2]-bbox1[0]+1.) * (bbox1[3]-bbox1[1]+1.)+(bbox2[2]-bbox2[0]+1.) * (bbox2[3]-bbox2[1]+1.)-inters)
-    iou = inters / uni
+    union = ((bbox1[2]-bbox1[0]+1.) * (bbox1[3]-bbox1[1]+1.)+(bbox2[2]-bbox2[0]+1.) * (bbox2[3]-bbox2[1]+1.)-intersection)
+    iou = intersection / union
     return iou
 
 def visGroundTruthData(data):
@@ -151,3 +148,39 @@ def pruneTracks(tracks, nms_thresh):
     tracks[:, [1, 6]] = tracks[:, [6, 1]]
     tracks = tracks[:, :-1]
     return tracks, nms_array
+
+def interpolateTrack(track):
+    """
+    A track is assumed to be the format of frame, track_id, xmin, ymin, xmax, ymax format
+    """
+    interpolate_list = []
+    for i in range(0, track.shape[0]-1):
+        curr_frame, next_frame = track[i, 0], track[i+1, 0]
+        frame_gap = next_frame - curr_frame
+        curr_box, next_box = track[i], track[i+1]
+        if frame_gap > 1:
+            count = 1
+            for inter_frame in range(curr_frame+1, next_frame):
+                inter_id = curr_box[1]
+                inter_x1 = curr_box[2] + (count / frame_gap) * (next_box[2] - curr_box[2])
+                inter_y1 = curr_box[3] + (count / frame_gap) * (next_box[3] - curr_box[3])
+                inter_x2 = curr_box[4] + (count / frame_gap) * (next_box[4] - curr_box[4])
+                inter_y2 = curr_box[5] + (count / frame_gap) * (next_box[5] - curr_box[5])
+                interpolate_list.append((inter_frame, inter_id, inter_x1, inter_y1, inter_x2, inter_y2))
+                count += 1
+                
+    if len(interpolate_list) != 0:
+        track = np.concatenate((track, np.stack(interpolate_list)))
+    inds = np.argsort(track[:, 0])
+    track = track[inds].astype(np.int)
+    return track
+    
+def interpolateTracks(tracks):    
+    interpolated_tracks = []
+    for track_id in np.unique(tracks[:, 1]):
+        track = tracks[tracks[:, 1] == track_id]
+        track_ = interpolateTrack(track)
+        interpolated_tracks.append(track_)
+
+    interpolated_tracks = np.concatenate(interpolated_tracks)
+    return interpolated_tracks

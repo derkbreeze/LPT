@@ -1,3 +1,6 @@
+import numpy as np 
+import gurobipy as gp 
+
 import torch
 from torch.autograd import Function
 
@@ -10,8 +13,6 @@ import time
 from enum import Enum
 
 def forward_single_np_gurobi(Q, p, G, h, A, b, test = False):
-    import gurobipy as gp
-    import numpy as np
     '''
     Convert to Gurobi model. Copied from 
     https://github.com/stephane-caron/qpsolvers/blob/master/qpsolvers/gurobi_.py
@@ -65,8 +66,6 @@ def forward_single_np_gurobi(Q, p, G, h, A, b, test = False):
     return model.ObjVal, x_opt, nu, lam, slacks
 
 def make_gurobi_model(G, h, A, b, Q,test=False):
-    import gurobipy as gp
-    import numpy as np
     '''
     Convert to Gurobi model. Copied from 
     https://github.com/stephane-caron/qpsolvers/blob/master/qpsolvers/gurobi_.py
@@ -109,8 +108,6 @@ def make_gurobi_model(G, h, A, b, Q,test=False):
     return model, x, inequality_constraints, equality_constraints, obj
 
 def forward_gurobi_prebuilt(Q, p, model, x, inequality_constraints, equality_constraints, G, h, quadobj):
-    import gurobipy as gp
-    import numpy as np
     obj = gp.QuadExpr()
     obj += quadobj
     for i in range(len(p)):
@@ -134,7 +131,7 @@ class QPSolvers(Enum):
     CUSTOM = 4
 
 def QPFunction(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolvers.PDIPM_BATCHED,
-               check_Q_spd=True, model_params = None, custom_solver=None):
+               check_Q_spd=True, model_params=None, custom_solver=None):
     
     if model_params is not None:
         model, x, inequality_constraints, equality_constraints, obj = model_params
@@ -288,7 +285,6 @@ def QPFunction(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolv
         def backward(ctx, dl_dzhat):
             nonlocal run_time
             start = time.time()
-            #import ipdb; ipdb.set_trace()
             zhats, Q, p, G, h, A, b = ctx.saved_tensors
             nBatch = extract_nBatch(Q, p, G, h, A, b)
             Q, Q_e = expandParam(Q, nBatch, 3)
@@ -343,9 +339,12 @@ def QPFunction(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolv
             run_time += end -start
 
             return grads
+
     def Runtime():
             return run_time
-    QPFunction.Runtime = Runtime             
+
+    QPFunction.Runtime = Runtime
+    #import ipdb;ipdb.set_trace()          
     return QPFunctionFn.apply
 
 class SpQPFunction(Function):

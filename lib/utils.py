@@ -4,7 +4,7 @@ import numpy as np
 
 def computeBoxFeatures(bbox1, bbox2):
     """
-    Assuming bbox1, bbox2 in xmin, ymin, xmax, ymax format
+    Assuming bbox1, bbox2 are in the xmin, ymin, xmax, ymax format
     """
     xmin_1, ymax_1 = bbox1[0], bbox1[3]
     xmin_2, ymax_2 = bbox2[0], bbox2[3]
@@ -15,12 +15,11 @@ def computeBoxFeatures(bbox1, bbox2):
     x_rel_dist = 2 * (xmin_1 - xmin_2) / (height_1 + height_2)
     y_rel_size = np.log(height_1 / height_2)
     x_rel_size = np.log(width_1 / width_2)
-    
     return [y_rel_dist, x_rel_dist, y_rel_size, x_rel_size]
 
 def getIoU(bbox1, bbox2):
     """
-    Assuming bbox1, bbox2 in xmin, ymin, xmax, ymax format
+    Assuming bbox1, bbox2 are in the xmin, ymin, xmax, ymax format
     """
     ixmin = max(bbox1[0], bbox2[0])
     ixmax = min(bbox1[2], bbox2[2])
@@ -39,8 +38,7 @@ def visGroundTruthData(data):
     colors = np.random.rand(500, 3)
     resize_scale = 0.5
     for frame in range(int(data.ground_truth[:, 0].min()), int(data.ground_truth[:, 0].max())+1):
-        img_file = os.path.join('/home/lishuai/Experiment/MOT/MOT16/train/{}/img1/{:06d}.jpg'.format(
-            data.sequence, frame))
+        img_file = os.path.join('/home/lishuai/Experiment/MOT/MOT16/train/{}/img1/{:06d}.jpg'.format(data.sequence, frame))
         img = cv2.imread(img_file)
         img = cv2.resize(img, (int(resize_scale*img.shape[1]), int(resize_scale*img.shape[0])))
         cv2.putText(img, '{:04}'.format(frame), (0,50) ,cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255,0,255), thickness=2)
@@ -61,39 +59,39 @@ def drawline(img,pt1,pt2,color,thickness=1,style='dotted',gap=10):
     dist =((pt1[0]-pt2[0])**2+(pt1[1]-pt2[1])**2)**.5
     pts= []
     for i in  np.arange(0,dist,gap):
-        r=i/dist
-        x=int((pt1[0]*(1-r)+pt2[0]*r)+.5)
-        y=int((pt1[1]*(1-r)+pt2[1]*r)+.5)
+        r = i / dist
+        x, y = int((pt1[0]*(1-r)+pt2[0]*r)+.5), int((pt1[1]*(1-r)+pt2[1]*r)+.5)
         p = (x,y)
         pts.append(p)
 
     if style=='dotted':
         for p in pts:
-            cv2.circle(img,p,thickness,color,-1)
+            cv2.circle(img, p, thickness,color, -1)
     else:
-        s=pts[0]
-        e=pts[0]
+        s, e = pts[0], pts[0]
         i=0
         for p in pts:
-            s=e
-            e=p
-            if i%2==1:
-                cv2.line(img,s,e,color,thickness)
+            s = e
+            e = p
+            if i % 2 == 1:
+                cv2.line(img, s, e, color, thickness)
             i+=1
 
 def drawpoly(img,pts,color,thickness=1,style='dotted',):
-    s=pts[0]
-    e=pts[0]
+    s = pts[0]
+    e = pts[0]
     pts.append(pts.pop(0))
     for p in pts:
-        s=e
-        e=p
+        s = e
+        e = p
         drawline(img,s,e,color,thickness,style)
 
 def drawrect(img,pt1,pt2,color,thickness=1,style='dotted'):
     pts = [pt1,(pt2[0],pt1[1]),pt2,(pt1[0],pt2[1])] 
     drawpoly(img,pts,color,thickness,style)
-
+    
+    
+#####################Code used for postprocess the Network Flow output###########################
 def trackletNMS(src_tracklet, dst_tracklet):
     src_start_frame, src_end_frame = src_tracklet[:, 0].min(), src_tracklet[:, 0].max()
     dst_start_frame, dst_end_frame = dst_tracklet[:, 0].min(), dst_tracklet[:, 0].max()
@@ -104,7 +102,6 @@ def trackletNMS(src_tracklet, dst_tracklet):
         src_tracklet = tmp 
 
     assert src_tracklet[:, 0].min() <= dst_tracklet[:, 0].min(), 'Need to swap'
-    
     if src_tracklet[:, 0].min() < dst_tracklet[:, 0].min() and src_tracklet[:, 0].max() > dst_tracklet[:, 0].max():
         intersect_frames = np.intersect1d(src_tracklet[:, 0], dst_tracklet[:, 0])
         

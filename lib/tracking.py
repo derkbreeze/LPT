@@ -13,15 +13,15 @@ class Tracker(nn.Module):
         
     def linprog(self, c, A_eq, b_eq, A_ub, b_ub):
         """
-        Performs LP inference
+        Performs LP during inference stage
         c: LP learned cost function, numpy.ndarray, shape: (n, ) where n is the problem size
         A_eq, b_eq: equality constraint(flow conservation), numpy.ndarray, shape: (num_equality_constraints, n)
         A_ub, b_ub: inequality constraint, numpy.ndarray, shape: (num_inequality_constraints, n)
-        return: LP solution.
+        returns: LP solution.
         """
         model = gp.Model()
         model.setParam('OutputFlag', 0)
-        x = model.addMVar(shape = A_eq.shape[1], vtype=gp.GRB.BINARY, name='x')
+        x = model.addMVar(shape = A_eq.shape[1], vtype = gp.GRB.BINARY, name = 'x')
         model.setObjective(c @ x, gp.GRB.MINIMIZE)
         model.addConstr(A_eq @ x == b_eq.squeeze(), name = 'eq')
         model.addConstr(A_ub @ x <= b_ub.squeeze(), name = 'ineq')
@@ -34,21 +34,21 @@ class Tracker(nn.Module):
         return sol
     
     def build_constraint_torch(self, A_eq, b_eq, A_ub, b_ub):
-        A, b = torch.from_numpy(A_eq).float(), torch.from_numpy(b_eq).float().squeeze() #convert size nx1 to n
-        G, h = torch.from_numpy(A_ub).float(), torch.from_numpy(b_ub).float().squeeze()
+        A, b = torch.from_numpy(A_eq).float(), torch.from_numpy(b_eq).float().squeeze() #Convert from size nx1 to n
+        G, h = torch.from_numpy(A_ub).float(), torch.from_numpy(b_ub).float().squeeze() #Convert from size nx1 to n
         return A, b, G, h
     
     def build_constraint(self, data, max_frame_gap):
         """
-        Args:
-        data: an instance of torch_geometric.data.Data
-        max_frame_gap: maximal frame gap used to connect two detections across frames. Set to 1 during training
-
+        Build LP constraint used during training stage.
+        Args: data: an instance of torch_geometric.data.Data
+              max_frame_gap: maximal frame gap used to connect two detections across frames. Set to 1 during training
         returns:
         A_eq, b_eq, A_ub, b_ub: equality and in-equality constraints in LP
         x_gt: ground truth data association
         tran_indicator: indicating which parts of the edges(among temporal fully-connected edges) are selected
         """
+        edge_ind = 0
         num_nodes = data.x.shape[0]
         edges = data.edge_index.t().numpy()
         timestamps = data.ground_truth[:, 0].astype(int)
@@ -59,7 +59,6 @@ class Tracker(nn.Module):
 
         linkIndexGraph = np.zeros((num_nodes, num_nodes), dtype=np.int32)
         gtlinkIndexGraph = np.zeros((num_nodes, num_nodes), dtype=np.int32)
-        edge_ind, linkVector = 0, data.y.numpy()
         for i in range(linkIndexGraph.shape[0]):
             for j in range(linkIndexGraph.shape[0]):
                 frame_gap = timestamps[j] - timestamps[i]
@@ -67,10 +66,10 @@ class Tracker(nn.Module):
                     inds = np.logical_and(edges[:, 0] == i, edges[:, 1] == j) #bool np.array, array([False, True, False...])
                     if inds.sum() != 0:
                         edge_ind += 1
-                        ind = np.where(inds == True)[0][0] #array([1]) or so, so add one [0]
-                        tran_indicator[ind] = 1 #indicating this transition edge has been selected
+                        ind = np.where(inds == True)[0][0] #Something like np.array([1]), so add one [0]
+                        tran_indicator[ind] = 1 #Indicating this transition edge has been selected
                         linkIndexGraph[i, j] = edge_ind
-                        gtlinkIndexGraph[i, j] = linkVector[ind]
+                        gtlinkIndexGraph[i, j] = data.y.numpy()[ind]
 
         assert (linkIndexGraph.flatten() != 0).sum() == edge_ind, 'Shape Mismatch'
         assert tran_indicator.sum() == edge_ind, 'Shape Mismatch'
@@ -92,12 +91,9 @@ class Tracker(nn.Module):
 
         #Initialize the constraint matrices
         x_gt = np.zeros((edge_ind, 1), dtype=np.float32)
-        A_eq = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32) 
-        b_eq = np.zeros((num_nodes * 2, 1), dtype=np.float32)
-        A_ub = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32)
-        b_ub = np.ones((num_nodes * 2, 1), dtype=np.float32)
+        A_eq, b_eq = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32), np.zeros((num_nodes * 2, 1), dtype=np.float32)
+        A_ub, b_ub = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32), np.ones((num_nodes * 2, 1), dtype=np.float32)
         eq_ind, leq_ind = 0, 0
-
         for node in range(linkIndexGraph.shape[0]):
             out_nodes = np.where(linkIndexGraph[node, :] != 0)[0]
             in_nodes = np.where(linkIndexGraph[:, node] != 0)[0] 
@@ -227,27 +223,25 @@ class Tracker(nn.Module):
         if G is not None:
             for i in range(G.shape[0]):
                 row = np.where(G[i] != 0)[0]
-                inequality_constraints.append(model.addConstr(gp.quicksum(G[i,j]*x[j] for j in row) <= h[i]))
-
+                inequality_constraints.append(model.addConstr(gp.quicksum(G[i,j] * x[j] for j in row) <= h[i]))
         equality_constraints = []   #subject to A * x == b
         if A is not None:
             for i in range(A.shape[0]):
                 row = np.where(A[i] != 0)[0]
-                equality_constraints.append(model.addConstr(gp.quicksum(A[i,j]*x[j] for j in row) == b[i]))
+                equality_constraints.append(model.addConstr(gp.quicksum(A[i,j] * x[j] for j in row) == b[i]))
 
         obj = gp.QuadExpr()
         if Q is not None:
             rows, cols = Q.nonzero()
             for i, j in zip(rows, cols):
-                obj += x[i]*Q[i, j]*x[j]
+                obj += x[i] * Q[i, j] * x[j]
         return model, x, inequality_constraints, equality_constraints, obj
     
     def buildConstraint(self, linkIndexGraph):
         """
-        build constraint for network flow.
+        Build constraint for Network Flow inference stage.
         linkIndexGraph: Adjacency matrix, where non-zero element indicates the index of transition edge, begins from 1.
-
-        returns: A_eq, b_eq, A_ub, b_ub, constraints used in LP
+        Returns: A_eq, b_eq, A_ub, b_ub, constraints used in LP
         """
         num_nodes = linkIndexGraph.shape[0]
         entry_offset, exit_offset, link_offset = num_nodes, num_nodes * 2, num_nodes * 3

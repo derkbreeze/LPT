@@ -245,7 +245,6 @@ class Tracker(nn.Module):
         """
         num_nodes = linkIndexGraph.shape[0]
         entry_offset, exit_offset, link_offset = num_nodes, num_nodes * 2, num_nodes * 3
-
         edge_ind = linkIndexGraph.max() #Number of transition edges in the flow graph
         num_constraints = link_offset + edge_ind
         A_eq = np.zeros((num_nodes * 2, num_constraints), dtype=np.int8) #Reduce memory cost. e.g. MOT20 dataset.
@@ -362,11 +361,11 @@ class Tracker(nn.Module):
         linkIndexGraph: graph indicating which of the two detections have a connection.
         """
         num_nodes = linkIndexGraph.shape[0]
-        start_points = np.where(sol[num_nodes:num_nodes * 2] == 1)[0] # detection, entry/exit link nodes.
+        start_nodes = np.where(sol[num_nodes:num_nodes * 2] == 1)[0] # detection, entry/exit link nodes.
         tracklets, tracklet_id = [], 0 
-        for d in start_points:
-            curr_tracklet = [d]
-            curr_node = d
+        for start_node in start_nodes:
+            curr_tracklet = [start_node]
+            curr_node = start_node
             out_nodes = np.where(linkIndexGraph[curr_node, :] != 0)[0]
             out_edge_inds = linkIndexGraph[curr_node, :][out_nodes]
             while len(out_edge_inds) != 0:
@@ -374,7 +373,7 @@ class Tracker(nn.Module):
                 for edge_ind in out_edge_inds:
                     edge_ind = int(edge_ind)
                     #If this linke is active, then proceed to next node.
-                    if sol[num_nodes*3:][edge_ind-1]:
+                    if sol[num_nodes*3: ][edge_ind - 1]:
                         make_link = True
                         next_node = np.where(linkIndexGraph[curr_node, :] == edge_ind)[0].item()
                         curr_tracklet.append(next_node)
@@ -383,7 +382,7 @@ class Tracker(nn.Module):
                 if make_link:
                     curr_node = next_node
                     out_nodes = np.where(linkIndexGraph[curr_node, :] != 0)[0]
-                    out_edge_inds = linkIndexGraph[curr_node,:][out_nodes]
+                    out_edge_inds = linkIndexGraph[curr_node, :][out_nodes]
                 else:
                     out_edge_inds = []
 
@@ -396,7 +395,7 @@ class Tracker(nn.Module):
                     tracklet.append(curr_dets[i, 0:7])
                 tracklet = np.array(tracklet)
                 tracklet = np.concatenate([tracklet_id * np.ones((tracklet.shape[0], 1)),tracklet],axis=1)
-                tracklets.append(tracklet) #tracklet:local_tracklet_id,frame,x1,y1,x2,y2,score,local_det_index
+                tracklets.append(tracklet) #tracklet format: local_tracklet_id,frame,x1,y1,x2,y2,score,local_det_index
                 tracklet_id += 1
         tracklets = np.concatenate(tracklets).astype(np.int)
         tracklets[:, [0, 1]] = tracklets[:, [1, 0]]
@@ -505,17 +504,17 @@ class Tracker(nn.Module):
         tracklet_sol = self.linprog(trackletCost, A_eq, b_eq, A_ub, b_ub)
         feature_list, assignment_list = [], [] #cluster tracklets in current batch
         num_nodes = int(A_eq.shape[0] / 2)
-        start_points = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
-        for d in start_points:
-            curr_tracklet = [d]
-            curr_node = d
+        start_nodes = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
+        for start_node in start_nodes:
+            curr_tracklet = [start_node]
+            curr_node = start_node
             out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
             out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
             while len(out_edge_inds) != 0:
                 make_link = False
                 for edge_ind in out_edge_inds:
                     edge_ind = int(edge_ind)
-                    if tracklet_sol[num_nodes*3:][edge_ind-1]:
+                    if tracklet_sol[num_nodes*3: ][edge_ind - 1]:
                         make_link = True
                         next_node = np.where(linkIndexGraphTracklet[curr_node, :] == edge_ind)[0].item()
                         curr_tracklet.append(next_node)
@@ -573,18 +572,17 @@ class Tracker(nn.Module):
                             edge_cost.append(50)
 
         trackletCost = np.concatenate([-5 * np.ones(num_tracklets), np.ones(num_tracklets), 
-                                           np.ones(num_tracklets), np.array(edge_cost)])
-
+                                            np.ones(num_tracklets), np.array(edge_cost)])
         tracklet_sol = self.linprog(trackletCost, A_eq, b_eq, A_ub, b_ub)
         feature_list, assignment_list = [], [] #cluster tracklets in current batch
         
-        num_nodes = int(A_eq.shape[0]/2)
-        start_points = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
-        for d in start_points:
-            curr_tracklet = [d]
-            curr_node = d
+        num_nodes = int(A_eq.shape[0] / 2)
+        start_nodes = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
+        for start_node in start_nodes:
+            curr_tracklet = [start_node]
+            curr_node = start_node
             out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
-            out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
+            out_edge_inds = linkIndexGraphTracklet[curr_node, :][out_nodes]
             while len(out_edge_inds) != 0:
                 make_link = False
                 for edge_ind in out_edge_inds:
@@ -597,7 +595,7 @@ class Tracker(nn.Module):
                 if make_link:
                     curr_node = next_node
                     out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
-                    out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
+                    out_edge_inds = linkIndexGraphTracklet[curr_node, :][out_nodes]
                 else:
                     out_edge_inds = []
             tracklet = []
@@ -610,9 +608,9 @@ class Tracker(nn.Module):
     def mergeTracklets(self, tracks_list, features_list):
         global_assignment = dict() #This saves the tracklet(node) labeling in each batch.
         thresh = 6
-        for batch_ind in range(len(tracks_list)-1):
+        for batch_ind in range(len(tracks_list) - 1):
             #print('Batch {} and {}'.format(batch_ind, batch_ind+1))
-            src_tracklets, dst_tracklets = tracks_list[batch_ind], tracks_list[batch_ind+1]
+            src_tracklets, dst_tracklets = tracks_list[batch_ind], tracks_list[batch_ind + 1]
             num_src_tracklets = np.unique(src_tracklets[:, 1]).shape[0]
             num_dst_tracklets = np.unique(dst_tracklets[:, 1]).shape[0]
             if batch_ind == 0:
@@ -630,8 +628,8 @@ class Tracker(nn.Module):
                     dst_tracklet = dst_tracklets[dst_tracklets[:, 1] == dst_ind, :]
                     src_frames, dst_frames = src_tracklet[:, 0], dst_tracklet[:, 0]
 
-                    src_centers = ((src_tracklet[:, 2:4] + src_tracklet[:, 4:6])/2).astype(np.int)
-                    dst_centers = ((dst_tracklet[:, 2:4] + dst_tracklet[:, 4:6])/2).astype(np.int)
+                    src_centers = ((src_tracklet[:, 2:4] + src_tracklet[:, 4:6]) / 2).astype(np.int)
+                    dst_centers = ((dst_tracklet[:, 2:4] + dst_tracklet[:, 4:6]) / 2).astype(np.int)
                     src_vel = (src_centers[1:src_centers.shape[0]] - src_centers[0:-1]).mean(axis=0)
                     frame_gap = dst_tracklet[0, 0] - src_tracklet[-1, 0]
                     estimated_pos = src_centers[-1] + frame_gap * src_vel
@@ -693,12 +691,12 @@ class Tracker(nn.Module):
 
             interpTrack, Track = [], []
             for ind in range(curr_track.shape[0]-1):
-                curr_frame, next_frame = curr_track[ind][0], curr_track[ind+1][0]        
+                curr_frame, next_frame = curr_track[ind][0], curr_track[ind + 1][0]        
                 bbox = curr_track[curr_track[:, 0] == curr_frame, 0:5]
 
                 if bbox.shape[0] == 1 and next_frame - curr_frame > 1:
                     Track.append(bbox.squeeze())
-                    start_node, end_node = curr_track[ind], curr_track[ind+1] 
+                    start_node, end_node = curr_track[ind], curr_track[ind + 1] 
                     start_frame, end_frame = start_node[0], end_node[0]
                     for frame in range(start_frame+1, end_frame):
                         tmp = start_node + ((end_node-start_node)/(end_frame-start_frame))*(frame-start_frame) 
@@ -719,7 +717,7 @@ class Tracker(nn.Module):
             else:
                 Track = np.array(Track).astype(np.int)
             Track = Track[np.argsort(Track[:, 0])]
-            Track = np.concatenate([k*np.ones(Track.shape[0])[:,None], Track], axis=1)
+            Track = np.concatenate([k*np.ones(Track.shape[0])[:, None], Track], axis=1)
             final_tracks.append(Track)
 
         final_tracks = np.concatenate(final_tracks)

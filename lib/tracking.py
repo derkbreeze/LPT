@@ -13,15 +13,15 @@ class Tracker(nn.Module):
         
     def linprog(self, c, A_eq, b_eq, A_ub, b_ub):
         """
-        Performs LP during inference stage
+        Performs LP inference
         c: LP learned cost function, numpy.ndarray, shape: (n, ) where n is the problem size
         A_eq, b_eq: equality constraint(flow conservation), numpy.ndarray, shape: (num_equality_constraints, n)
         A_ub, b_ub: inequality constraint, numpy.ndarray, shape: (num_inequality_constraints, n)
-        returns: LP solution.
+        return: LP solution.
         """
         model = gp.Model()
         model.setParam('OutputFlag', 0)
-        x = model.addMVar(shape = A_eq.shape[1], vtype = gp.GRB.BINARY, name = 'x')
+        x = model.addMVar(shape = A_eq.shape[1], vtype=gp.GRB.BINARY, name='x')
         model.setObjective(c @ x, gp.GRB.MINIMIZE)
         model.addConstr(A_eq @ x == b_eq.squeeze(), name = 'eq')
         model.addConstr(A_ub @ x <= b_ub.squeeze(), name = 'ineq')
@@ -32,181 +32,7 @@ class Tracker(nn.Module):
             print('error in solver')
             sol = None
         return sol
-    
-    def build_constraint_torch(self, A_eq, b_eq, A_ub, b_ub):
-        A, b = torch.from_numpy(A_eq).float(), torch.from_numpy(b_eq).float().squeeze() #Convert from size nx1 to n
-        G, h = torch.from_numpy(A_ub).float(), torch.from_numpy(b_ub).float().squeeze() #Convert from size nx1 to n
-        return A, b, G, h
-    
-    def build_constraint(self, data, max_frame_gap):
-        """
-        Build LP constraint used during training stage.
-        Args: data: an instance of torch_geometric.data.Data
-              max_frame_gap: maximal frame gap used to connect two detections across frames. Set to 1 during training
-        returns:
-        A_eq, b_eq, A_ub, b_ub: equality and in-equality constraints in LP
-        x_gt: ground truth data association
-        tran_indicator: indicating which parts of the edges(among temporal fully-connected edges) are selected
-        """
-        edge_ind = 0
-        num_nodes = data.x.shape[0]
-        edges = data.edge_index.t().numpy()
-        timestamps = data.ground_truth[:, 0].astype(int)
-        entry_offset, exit_offset, link_offset = num_nodes, num_nodes * 2, num_nodes * 3
-        entry_indicator = np.zeros((num_nodes, 1), dtype=np.int32)  #Indicating which detections are selected as gt start 
-        exit_indicator = np.zeros((num_nodes, 1), dtype=np.int32)   #Indicating which detections are selected as gt terminal
-        tran_indicator = np.zeros((edges.shape[0], 1), dtype=np.int32)
 
-        linkIndexGraph = np.zeros((num_nodes, num_nodes), dtype=np.int32)
-        gtlinkIndexGraph = np.zeros((num_nodes, num_nodes), dtype=np.int32)
-        for i in range(linkIndexGraph.shape[0]):
-            for j in range(linkIndexGraph.shape[0]):
-                frame_gap = timestamps[j] - timestamps[i]
-                if frame_gap >= 1 and frame_gap <= max_frame_gap:        
-                    inds = np.logical_and(edges[:, 0] == i, edges[:, 1] == j) #bool np.array, array([False, True, False...])
-                    if inds.sum() != 0:
-                        edge_ind += 1
-                        ind = np.where(inds == True)[0][0] #Something like np.array([1]), so add one [0]
-                        tran_indicator[ind] = 1 #Indicating this transition edge has been selected
-                        linkIndexGraph[i, j] = edge_ind
-                        gtlinkIndexGraph[i, j] = data.y.numpy()[ind]
-
-        assert (linkIndexGraph.flatten() != 0).sum() == edge_ind, 'Shape Mismatch'
-        assert tran_indicator.sum() == edge_ind, 'Shape Mismatch'
-        num_constraints = link_offset + edge_ind
-        for i in range(linkIndexGraph.shape[0]):
-            incoming_flows = edges[:, 1] == i
-            if not np.any(incoming_flows):
-                start_node = i
-                entry_indicator[i] = 1
-                while np.any(gtlinkIndexGraph[i, :]):
-                    i = np.where(gtlinkIndexGraph[i, :] == 1)[0][0]
-                terminate_node = i
-                if terminate_node != start_node:
-                    exit_indicator[terminate_node] = 1
-                else:
-                    entry_indicator[i] = 0
-        assert entry_indicator.shape == exit_indicator.shape, "Shape mismatch"
-        assert entry_indicator.sum() ==  exit_indicator.sum(), "GT flow in != flow out" 
-
-        #Initialize the constraint matrices
-        x_gt = np.zeros((edge_ind, 1), dtype=np.float32)
-        A_eq, b_eq = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32), np.zeros((num_nodes * 2, 1), dtype=np.float32)
-        A_ub, b_ub = np.zeros((num_nodes * 2, num_constraints), dtype=np.float32), np.ones((num_nodes * 2, 1), dtype=np.float32)
-        eq_ind, leq_ind = 0, 0
-        for node in range(linkIndexGraph.shape[0]):
-            out_nodes = np.where(linkIndexGraph[node, :] != 0)[0]
-            in_nodes = np.where(linkIndexGraph[:, node] != 0)[0] 
-            if out_nodes.shape[0] != 0: # Note that linkIndex starts at 1, so minus 1 at certain indexes
-                for out_node in out_nodes:
-                    link_ind = linkIndexGraph[node, out_node]
-                    x_gt[link_ind - 1] = gtlinkIndexGraph[node, out_node]
-
-            if in_nodes.shape[0] != 0:
-                for in_node in in_nodes:
-                    link_ind = linkIndexGraph[in_node, node]
-                    x_gt[link_ind - 1] = gtlinkIndexGraph[in_node, node]
-
-            if out_nodes.shape[0] != 0 and in_nodes.shape[0] != 0:
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1 #flow in <= 1    
-                for in_node in in_nodes:
-                    link_ind = linkIndexGraph[in_node, node]
-                    constraint[link_offset + link_ind -1] = 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1 #flow in == detection edge
-                for in_node in in_nodes:
-                    link_index = linkIndexGraph[in_node, node]
-                    constraint[link_offset + link_ind - 1] = 1
-                constraint[node] = -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1 #flow coming out <= 1
-                for out_node in out_nodes:
-                    link_ind = linkIndexGraph[node, out_node]
-                    constraint[link_offset + link_ind - 1] = 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1 #flow out == detection edge
-                for out_node in out_nodes:
-                    link_index = linkIndexGraph[node, out_node]
-                    constraint[link_offset + link_ind - 1] = 1
-                constraint[node] = -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-            elif out_nodes.shape[0] != 0 and in_nodes.shape[0] == 0:
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1 #flow coming out <= 1
-                for out_node in out_nodes:
-                    link_ind = linkIndexGraph[node, out_node]
-                    constraint[link_offset + link_ind - 1] = 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1 #flow coming in <= 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1 #flow out == detection edge
-                for out_node in out_nodes:
-                    link_ind = linkIndexGraph[node, out_node] #link_index starts from 1, so.
-                    constraint[link_offset + link_ind - 1] = 1 #flow transition to next node
-                constraint[node] = -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-
-                constraint = np.zeros(num_constraints)                    #flow in == detection edge
-                constraint[entry_offset + node], constraint[node] = 1, -1 #flow coming from start node
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-            elif out_nodes.shape[0] == 0 and in_nodes.shape[0] != 0:
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1 #flow in <= 1
-                for in_node in in_nodes:
-                    link_index = linkIndexGraph[in_node, node]
-                    constraint[link_offset + link_ind - 1] = 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1 #flow out <= 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1 #flow in == detection edge
-                for in_node in in_nodes:
-                    link_ind = linkIndexGraph[in_node, node]
-                    constraint[link_offset + link_ind - 1] = 1
-                constraint[node] = -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-
-                constraint = np.zeros(num_constraints) # flow coming out == detection edge
-                constraint[exit_offset + node], constraint[node] = 1, -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-            elif out_nodes.shape[0] == 0 and in_nodes.shape[0] == 0:
-                constraint, constraint[entry_offset + node] = np.zeros(num_constraints), 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint, constraint[exit_offset + node] = np.zeros(num_constraints), 1
-                A_ub[leq_ind, :] = constraint
-                leq_ind += 1
-
-                constraint = np.zeros(num_constraints)
-                constraint[entry_offset + node], constraint[node] = 1, -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-
-                constraint = np.zeros(num_constraints)
-                constraint[exit_offset + node], constraint[node] = 1, -1
-                A_eq[eq_ind, :] = constraint
-                eq_ind += 1
-        det_indicator = np.ones((entry_offset, 1))
-        x_gt = np.concatenate([det_indicator, entry_indicator, exit_indicator, x_gt], axis=0)
-        return A_eq, b_eq, A_ub, b_ub, x_gt, tran_indicator
-    
     def make_gurobi_model_tracking(self, G, h, A, b, Q, test=False):
         '''
         Convert to Gurobi model. Copied from 
@@ -223,37 +49,81 @@ class Tracker(nn.Module):
         if G is not None:
             for i in range(G.shape[0]):
                 row = np.where(G[i] != 0)[0]
-                inequality_constraints.append(model.addConstr(gp.quicksum(G[i,j] * x[j] for j in row) <= h[i]))
+                inequality_constraints.append(model.addConstr(gp.quicksum(G[i,j]*x[j] for j in row) <= h[i]))
+
         equality_constraints = []   #subject to A * x == b
         if A is not None:
             for i in range(A.shape[0]):
                 row = np.where(A[i] != 0)[0]
-                equality_constraints.append(model.addConstr(gp.quicksum(A[i,j] * x[j] for j in row) == b[i]))
+                equality_constraints.append(model.addConstr(gp.quicksum(A[i,j]*x[j] for j in row) == b[i]))
 
         obj = gp.QuadExpr()
         if Q is not None:
             rows, cols = Q.nonzero()
             for i, j in zip(rows, cols):
-                obj += x[i] * Q[i, j] * x[j]
+                obj += x[i]*Q[i, j]*x[j]
         return model, x, inequality_constraints, equality_constraints, obj
-    
-    def buildConstraint(self, linkIndexGraph):
+
+    def build_constraint_training(self, data, max_frame_gap = 1):
         """
-        Build constraint for Network Flow inference stage.
+        Build constraints for end-to-end training.
+        """
+        ground_truth = np.concatenate((data.ground_truth, np.arange(data.ground_truth.shape[0])[:, None]), axis=1)
+        timestamps = ground_truth[:, 0].astype(int)
+        edges = data.edge_index.T.numpy()
+        num_nodes = data.x.shape[0]
+        entry_offset, exit_offset, link_offset = num_nodes, num_nodes * 2, num_nodes * 3
+        det_gt = np.ones(num_nodes, dtype = np.int32)
+        entry_gt = np.zeros(num_nodes, dtype = np.int32)
+        exit_gt = np.zeros(num_nodes, dtype = np.int32)
+        tran_gt = np.zeros(data.y.shape[0], dtype = np.int32)
+        tran_indicator = np.ones_like(tran_gt)
+
+        linkIndexGraph = np.zeros((num_nodes, num_nodes), dtype = np.int32)
+        edge_ind = 0
+        for src_node in range(num_nodes):    
+            for dst_node in range(num_nodes):
+                frame_gap = timestamps[dst_node] - timestamps[src_node]
+                if frame_gap >= 1 and frame_gap <= max_frame_gap:
+        #             print('src_node {} dst_node {}, edge_ind {} frame_gap {} GT conn {}'.format(
+        #                   src_node, dst_node, edge_ind, frame_gap, data.y[edge_ind]))
+
+                    tran_gt[edge_ind] = data.y[edge_ind]
+                    edge_ind += 1
+                    linkIndexGraph[src_node, dst_node] = edge_ind #starts from 1
+
+        assert linkIndexGraph.max() == edge_ind
+        assert tran_indicator.sum() == edge_ind
+
+        entry_gt = np.zeros(num_nodes, dtype = np.int32)
+        exit_gt = np.zeros(num_nodes, dtype = np.int32)
+        for i in np.unique(ground_truth[:, 1]):
+            inds = np.where(ground_truth[:, 1] == i)[0]
+            entry_gt[inds[0]] = 1
+            exit_gt[inds[-1]] = 1
+        assert entry_gt.sum() == exit_gt.sum()
+        assert entry_gt.sum() == np.unique(ground_truth[:, 1]).__len__(), 'Ground Truth Error!'
+        A_eq, b_eq, A_ub, b_ub = self.build_constraint(linkIndexGraph)
+        x_gt = np.concatenate((det_gt, entry_gt, exit_gt, tran_gt))
+
+        return A_eq, b_eq, A_ub, b_ub, x_gt
+
+    def build_constraint(self, linkIndexGraph):
+        """
+        Build constraints for Network Flow.
         linkIndexGraph: Adjacency matrix, where non-zero element indicates the index of transition edge, begins from 1.
-        Returns: A_eq, b_eq, A_ub, b_ub, constraints used in LP
+        Returns: A_eq, b_eq, A_ub, b_ub used in Linear Program.
         """
         num_nodes = linkIndexGraph.shape[0]
         entry_offset, exit_offset, link_offset = num_nodes, num_nodes * 2, num_nodes * 3
-        edge_ind = linkIndexGraph.max() #Number of transition edges in the flow graph
-        num_constraints = link_offset + edge_ind
+        num_constraints = link_offset + linkIndexGraph.max()
         A_eq = np.zeros((num_nodes * 2, num_constraints), dtype=np.int8) #Reduce memory cost. e.g. MOT20 dataset.
         b_eq = np.zeros((num_nodes * 2, 1), dtype=np.int8)
         A_ub = np.zeros((num_nodes * 2, num_constraints), dtype=np.int8)
         b_ub = np.ones((num_nodes * 2, 1), dtype=np.int8)
+
         eq_ind, leq_ind = 0, 0
         for node in range(linkIndexGraph.shape[0]):
-
             out_nodes = np.where(linkIndexGraph[node, :] != 0)[0]
             in_nodes = np.where(linkIndexGraph[:, node] != 0)[0]
             if out_nodes.shape[0] != 0 and in_nodes.shape[0] != 0:
@@ -361,11 +231,11 @@ class Tracker(nn.Module):
         linkIndexGraph: graph indicating which of the two detections have a connection.
         """
         num_nodes = linkIndexGraph.shape[0]
-        start_nodes = np.where(sol[num_nodes:num_nodes * 2] == 1)[0] # detection, entry/exit link nodes.
+        start_points = np.where(sol[num_nodes:num_nodes * 2] == 1)[0] # detection, entry/exit link nodes.
         tracklets, tracklet_id = [], 0 
-        for start_node in start_nodes:
-            curr_tracklet = [start_node]
-            curr_node = start_node
+        for d in start_points:
+            curr_tracklet = [d]
+            curr_node = d
             out_nodes = np.where(linkIndexGraph[curr_node, :] != 0)[0]
             out_edge_inds = linkIndexGraph[curr_node, :][out_nodes]
             while len(out_edge_inds) != 0:
@@ -373,7 +243,7 @@ class Tracker(nn.Module):
                 for edge_ind in out_edge_inds:
                     edge_ind = int(edge_ind)
                     #If this linke is active, then proceed to next node.
-                    if sol[num_nodes*3: ][edge_ind - 1]:
+                    if sol[num_nodes*3:][edge_ind-1]:
                         make_link = True
                         next_node = np.where(linkIndexGraph[curr_node, :] == edge_ind)[0].item()
                         curr_tracklet.append(next_node)
@@ -382,7 +252,7 @@ class Tracker(nn.Module):
                 if make_link:
                     curr_node = next_node
                     out_nodes = np.where(linkIndexGraph[curr_node, :] != 0)[0]
-                    out_edge_inds = linkIndexGraph[curr_node, :][out_nodes]
+                    out_edge_inds = linkIndexGraph[curr_node,:][out_nodes]
                 else:
                     out_edge_inds = []
 
@@ -395,7 +265,7 @@ class Tracker(nn.Module):
                     tracklet.append(curr_dets[i, 0:7])
                 tracklet = np.array(tracklet)
                 tracklet = np.concatenate([tracklet_id * np.ones((tracklet.shape[0], 1)),tracklet],axis=1)
-                tracklets.append(tracklet) #tracklet format: local_tracklet_id,frame,x1,y1,x2,y2,score,local_det_index
+                tracklets.append(tracklet) #tracklet:local_tracklet_id,frame,x1,y1,x2,y2,score,local_det_index
                 tracklet_id += 1
         tracklets = np.concatenate(tracklets).astype(np.int)
         tracklets[:, [0, 1]] = tracklets[:, [1, 0]]
@@ -443,7 +313,7 @@ class Tracker(nn.Module):
         tracks = np.concatenate(tracks).astype(np.int) #tracks in the current batch
         return tracks
     
-    def buildConstraintTracklet(self, tracklets):
+    def build_constraint_tracklet(self, tracklets):
         """
         build constraint for tracklet stitching, for handling long-term occlusion.
         tracklets: frame, id, x, y, w, h format.
@@ -461,7 +331,7 @@ class Tracker(nn.Module):
                     edge_ind += 1
                     linkIndexGraphTracklet[src_id, dst_id] = edge_ind
 
-        A_eq, b_eq, A_ub, b_ub = self.buildConstraint(linkIndexGraphTracklet)  
+        A_eq, b_eq, A_ub, b_ub = self.build_constraint(linkIndexGraphTracklet)  
         return linkIndexGraphTracklet, A_eq, b_eq, A_ub, b_ub
     
     def clusterTracklets(self, tracklets, curr_app_feat_norm, dist_thresh, app_thresh):
@@ -473,7 +343,7 @@ class Tracker(nn.Module):
             mean_app_feats.append(mean_app_feat)    
         mean_app_feats = np.array(mean_app_feats)
         mean_app_feats /= np.linalg.norm(mean_app_feats, axis=1, keepdims=True)
-        linkIndexGraphTracklet, A_eq, b_eq, A_ub, b_ub = self.buildConstraintTracklet(tracklets)
+        linkIndexGraphTracklet, A_eq, b_eq, A_ub, b_ub = self.build_constraint_tracklet(tracklets)
         edge_cost, num_tracklets = [], linkIndexGraphTracklet.shape[0]
 
         for i in range(num_tracklets):
@@ -504,17 +374,17 @@ class Tracker(nn.Module):
         tracklet_sol = self.linprog(trackletCost, A_eq, b_eq, A_ub, b_ub)
         feature_list, assignment_list = [], [] #cluster tracklets in current batch
         num_nodes = int(A_eq.shape[0] / 2)
-        start_nodes = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
-        for start_node in start_nodes:
-            curr_tracklet = [start_node]
-            curr_node = start_node
+        start_points = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
+        for d in start_points:
+            curr_tracklet = [d]
+            curr_node = d
             out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
             out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
             while len(out_edge_inds) != 0:
                 make_link = False
                 for edge_ind in out_edge_inds:
                     edge_ind = int(edge_ind)
-                    if tracklet_sol[num_nodes*3: ][edge_ind - 1]:
+                    if tracklet_sol[num_nodes*3:][edge_ind-1]:
                         make_link = True
                         next_node = np.where(linkIndexGraphTracklet[curr_node, :] == edge_ind)[0].item()
                         curr_tracklet.append(next_node)
@@ -545,7 +415,7 @@ class Tracker(nn.Module):
             mean_app_feats.append(mean_app_feat)    
         mean_app_feats = np.array(mean_app_feats)
         mean_app_feats /= np.linalg.norm(mean_app_feats, axis=1, keepdims=True)
-        linkIndexGraphTracklet, A_eq, b_eq, A_ub, b_ub = self.buildConstraintTracklet(tracklets)
+        linkIndexGraphTracklet, A_eq, b_eq, A_ub, b_ub = self.build_constraint_tracklet(tracklets)
         num_tracklets = linkIndexGraphTracklet.shape[0]
         edge_cost = []
         for i in range(num_tracklets):
@@ -572,17 +442,18 @@ class Tracker(nn.Module):
                             edge_cost.append(50)
 
         trackletCost = np.concatenate([-5 * np.ones(num_tracklets), np.ones(num_tracklets), 
-                                            np.ones(num_tracklets), np.array(edge_cost)])
+                                           np.ones(num_tracklets), np.array(edge_cost)])
+
         tracklet_sol = self.linprog(trackletCost, A_eq, b_eq, A_ub, b_ub)
         feature_list, assignment_list = [], [] #cluster tracklets in current batch
         
-        num_nodes = int(A_eq.shape[0] / 2)
-        start_nodes = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
-        for start_node in start_nodes:
-            curr_tracklet = [start_node]
-            curr_node = start_node
+        num_nodes = int(A_eq.shape[0]/2)
+        start_points = np.where(tracklet_sol[num_tracklets:num_tracklets * 2] == 1)[0]
+        for d in start_points:
+            curr_tracklet = [d]
+            curr_node = d
             out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
-            out_edge_inds = linkIndexGraphTracklet[curr_node, :][out_nodes]
+            out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
             while len(out_edge_inds) != 0:
                 make_link = False
                 for edge_ind in out_edge_inds:
@@ -595,7 +466,7 @@ class Tracker(nn.Module):
                 if make_link:
                     curr_node = next_node
                     out_nodes = np.where(linkIndexGraphTracklet[curr_node, :] != 0)[0]
-                    out_edge_inds = linkIndexGraphTracklet[curr_node, :][out_nodes]
+                    out_edge_inds = linkIndexGraphTracklet[curr_node,:][out_nodes]
                 else:
                     out_edge_inds = []
             tracklet = []
@@ -608,9 +479,9 @@ class Tracker(nn.Module):
     def mergeTracklets(self, tracks_list, features_list):
         global_assignment = dict() #This saves the tracklet(node) labeling in each batch.
         thresh = 6
-        for batch_ind in range(len(tracks_list) - 1):
+        for batch_ind in range(len(tracks_list)-1):
             #print('Batch {} and {}'.format(batch_ind, batch_ind+1))
-            src_tracklets, dst_tracklets = tracks_list[batch_ind], tracks_list[batch_ind + 1]
+            src_tracklets, dst_tracklets = tracks_list[batch_ind], tracks_list[batch_ind+1]
             num_src_tracklets = np.unique(src_tracklets[:, 1]).shape[0]
             num_dst_tracklets = np.unique(dst_tracklets[:, 1]).shape[0]
             if batch_ind == 0:
@@ -628,8 +499,8 @@ class Tracker(nn.Module):
                     dst_tracklet = dst_tracklets[dst_tracklets[:, 1] == dst_ind, :]
                     src_frames, dst_frames = src_tracklet[:, 0], dst_tracklet[:, 0]
 
-                    src_centers = ((src_tracklet[:, 2:4] + src_tracklet[:, 4:6]) / 2).astype(np.int)
-                    dst_centers = ((dst_tracklet[:, 2:4] + dst_tracklet[:, 4:6]) / 2).astype(np.int)
+                    src_centers = ((src_tracklet[:, 2:4] + src_tracklet[:, 4:6])/2).astype(np.int)
+                    dst_centers = ((dst_tracklet[:, 2:4] + dst_tracklet[:, 4:6])/2).astype(np.int)
                     src_vel = (src_centers[1:src_centers.shape[0]] - src_centers[0:-1]).mean(axis=0)
                     frame_gap = dst_tracklet[0, 0] - src_tracklet[-1, 0]
                     estimated_pos = src_centers[-1] + frame_gap * src_vel
@@ -691,12 +562,12 @@ class Tracker(nn.Module):
 
             interpTrack, Track = [], []
             for ind in range(curr_track.shape[0]-1):
-                curr_frame, next_frame = curr_track[ind][0], curr_track[ind + 1][0]        
+                curr_frame, next_frame = curr_track[ind][0], curr_track[ind+1][0]        
                 bbox = curr_track[curr_track[:, 0] == curr_frame, 0:5]
 
                 if bbox.shape[0] == 1 and next_frame - curr_frame > 1:
                     Track.append(bbox.squeeze())
-                    start_node, end_node = curr_track[ind], curr_track[ind + 1] 
+                    start_node, end_node = curr_track[ind], curr_track[ind+1] 
                     start_frame, end_frame = start_node[0], end_node[0]
                     for frame in range(start_frame+1, end_frame):
                         tmp = start_node + ((end_node-start_node)/(end_frame-start_frame))*(frame-start_frame) 
@@ -717,7 +588,7 @@ class Tracker(nn.Module):
             else:
                 Track = np.array(Track).astype(np.int)
             Track = Track[np.argsort(Track[:, 0])]
-            Track = np.concatenate([k*np.ones(Track.shape[0])[:, None], Track], axis=1)
+            Track = np.concatenate([k*np.ones(Track.shape[0])[:,None], Track], axis=1)
             final_tracks.append(Track)
 
         final_tracks = np.concatenate(final_tracks)

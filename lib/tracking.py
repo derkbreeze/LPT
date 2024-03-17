@@ -476,7 +476,7 @@ class Tracker(nn.Module):
             feature_list.append(mean_app_feats[np.array(tracklet)].mean(axis=0))
         return assignment_list, feature_list
     
-    def mergeTracklets(self, tracks_list, features_list):
+    def stitchTracklets(self, tracks_list, features_list):
         global_assignment = dict() #This saves the tracklet(node) labeling in each batch.
         thresh = 6
         for batch_ind in range(len(tracks_list)-1):

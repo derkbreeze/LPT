@@ -21,14 +21,16 @@ gurobi_solver = gp.Model()
 ```
 
 ## Data
-Download pre-processed detections&appearance features (~1.4GB): [\[Google Drive\]](https://drive.google.com/file/d/1aJBJcBcD9YNvFvLVb_ECP2W8mYBzPpoI/view?usp=sharing)
-We aslo provide the tracking results on MOT17/20 test set in txt format, which can replicate the numbers reported in the paper.
+Download pre-processed detections&&appearance features (~1.4GB): [\[Google Drive\]](https://drive.google.com/file/d/1rD5gozRbZcMntZAmbCkgJ1qF8X8NNRFb/view?usp=sharing)
+We aslo provide the tracking results on MOT17/20 test set in txt format, which are the results reported in the paper.
 
 ## Training
-Execute run_train.ipynb. Monitor all relevant metrics, using our provided data, the loss converges at around 8 epochs. Training with more data might be helpful, but not tested.
+In order to replicate the results, you need to adjust the MOT17/20 data path accordingly.
+
+Execute run_train.ipynb and monitor all relevant metrics, in general the loss converges at around 8 epochs.
 
 ## Inference
-Execute run_test.ipynb, you need to adjust the MOT17/20 data path accordingly. Note that for one specific MOT20 sequence, running time could be long. 
+Execute run_test.ipynb. Note that for one specific MOT20 sequence, it may take more time for the inference due to the large number of objects to track. 
 
 If you have any questions using this code, please open an issue. I'll respond ASAP.
 
